@@ -1,0 +1,24 @@
+--- F:/perllib/.cpan/build/libnet-1.0505/Net/FTP.pm	Mon Mar 17 06:12:58 1997
++++ Net/FTP.pm	Fri Jun 20 18:35:56 1997
+@@ -191,8 +191,10 @@
+      ($ruser,$pass,$acct) = $rc->lpa()
+ 	if ($rc);
+ 
+-     $pass = "-" . (getpwuid($>))[0] . "@" 
+-        if (!defined $pass && $ruser =~ /^anonymous/o);
++     eval {
++	$pass = "-" . (getpwuid($>))[0] . "@" 
++            if (!defined $pass && $ruser =~ /^anonymous/o);
++     };				# getpwuid may be undefined
+     }
+ 
+    $ok = $ftp->_PASS($pass || "");
+@@ -217,7 +219,7 @@
+   {
+    require Net::Netrc;
+ 
+-   $auth ||= (getpwuid($>))[0];
++   $auth ||= eval { (getpwuid($>))[0] };
+ 
+    my $rc = Net::Netrc->lookup(${*$ftp}{'net_ftp_firewall'}, $auth)
+         || Net::Netrc->lookup(${*$ftp}{'net_ftp_firewall'});

@@ -1,0 +1,86 @@
+--- H:/get/perl/perl5.004_01/lib/CPAN.pm	Fri Jun  6 17:00:48 1997
++++ ./lib/CPAN.pm	Fri Jun 20 23:42:04 1997
+@@ -23,8 +23,8 @@
+ use Text::Wrap;
+ 
+ my $getcwd;
+-$getcwd  = $CPAN::Config->{'getcwd'} || 'cwd';
+-$Cwd = Cwd->$getcwd();
++$getcwd  = $CPAN::Config->{'getcwd'} || 'Cwd::cwd';
++$Cwd = &$getcwd();
+ 
+ END { $End++; &cleanup; }
+ 
+@@ -306,8 +306,8 @@
+     no strict;
+     $META->checklock();
+     my $getcwd;
+-    $getcwd = $CPAN::Config->{'getcwd'} || 'cwd';
+-    my $cwd = Cwd->$getcwd();
++    $getcwd = $CPAN::Config->{'getcwd'} || 'Cwd::cwd';
++    my $cwd = &$getcwd();
+     my $rl_avail = $Suppress_readline ? "suppressed" :
+ 	($term->ReadLine ne "Term::ReadLine::Stub") ? "enabled" :
+ 	    "available (get Term::ReadKey and Term::ReadLine::Perl ".
+@@ -422,8 +422,8 @@
+     $self->debug("reading dir[$dir]") if $CPAN::DEBUG;
+     $dir ||= $self->{ID};
+     my $getcwd;
+-    $getcwd  = $CPAN::Config->{'getcwd'} || 'cwd';
+-    my($cwd) = Cwd->$getcwd();
++    $getcwd  = $CPAN::Config->{'getcwd'} || 'Cwd::cwd';
++    my($cwd) = &$getcwd();
+     chdir $dir or Carp::croak("Can't chdir to $dir: $!");
+     my $dh = DirHandle->new(".") or Carp::croak("Couldn't opendir $dir: $!");
+     my(@entries);
+@@ -520,7 +520,7 @@
+ #    print "caller[$caller]func[$func]line[$line]rest[@rest]\n";
+ #    print "CPAN::DEBUG{caller}[$CPAN::DEBUG{$caller}]CPAN::DEBUG[$CPAN::DEBUG]\n";
+     if ($CPAN::DEBUG{$caller} & $CPAN::DEBUG){
+-	if (ref $arg) {
++	if ($arg and ref $arg) {
+ 	    eval { require Data::Dumper };
+ 	    if ($@) {
+ 		print $arg->as_string;
+@@ -1615,7 +1615,7 @@
+     my($perms,%user,%group);
+     my $pname = $name;
+ 
+-    if (defined $blocks) {
++    if ($blocks) {
+ 	$blocks = int(($blocks + 1) / 2);
+     }
+     else {
+@@ -2242,8 +2244,8 @@
+     my $dir  = $self->dir or $self->get;
+     $dir = $self->dir;
+     my $getcwd;
+-    $getcwd = $CPAN::Config->{'getcwd'} || 'cwd';
+-    my $pwd  = Cwd->$getcwd();
++    $getcwd = $CPAN::Config->{'getcwd'} || 'Cwd::cwd';
++    my $pwd  = &$getcwd();
+     chdir($dir);
+     print qq{Working directory is $dir.\n};
+     system($CPAN::Config->{'shell'}) == 0 or die "Subprocess shell error";
+@@ -2411,8 +2413,8 @@
+ sub perl {
+     my($self) = @_;
+     my($perl) = MM->file_name_is_absolute($^X) ? $^X : "";
+-    my $getcwd = $CPAN::Config->{'getcwd'} || 'cwd';
+-    my $pwd  = Cwd->$getcwd();
++    my $getcwd = $CPAN::Config->{'getcwd'} || 'Cwd::cwd';
++    my $pwd  = &$getcwd();
+     my $candidate = $CPAN::META->catfile($pwd,$^X);
+     $perl ||= $candidate if MM->maybe_command($candidate);
+     unless ($perl) {
+@@ -2684,8 +2686,8 @@
+     my $manifest = $CPAN::META->catfile($where,"MANIFEST");
+     unless (-f $manifest) {
+ 	require ExtUtils::Manifest;
+-	my $getcwd = $CPAN::Config->{'getcwd'} || 'cwd';
+-	my $cwd = Cwd->$getcwd();
++	my $getcwd = $CPAN::Config->{'getcwd'} || 'Cwd::cwd';
++	my $cwd = &$getcwd();
+ 	chdir $where;
+ 	ExtUtils::Manifest::mkmanifest();
+ 	chdir $cwd;

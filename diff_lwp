@@ -1,0 +1,12 @@
+diff -pru F:\perllib\.cpan\build\libwww-perl-5.10\blib\lib\LWP/UserAgent.pm LWP/UserAgent.pm
+--- F:/perllib/.cpan/build/libwww-perl-5.10/blib/lib/LWP/UserAgent.pm	Fri Jun 20 02:09:44 1997
++++ LWP/UserAgent.pm	Fri Jun 20 21:22:32 1997
+@@ -672,6 +672,8 @@ sub mirror
+ 		"expected $content_length bytes, got $file_length\n";
+ 	} else {
+ 	    # OK
++	    chmod 0777, $file or die "Cannot chmod '$file' to 0777: $!\n";
++	    unlink $file or die "Cannot unlink '$file': $!\n";
+ 	    rename($tmpfile, $file) or
+ 		die "Cannot rename '$tmpfile' to '$file': $!\n";
+ 	}

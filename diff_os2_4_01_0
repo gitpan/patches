@@ -1,0 +1,336 @@
+diff -pru perl5.004_01/os2/Changes perl5.004_01.my/os2/Changes
+--- perl5.004_01/os2/Changes	Fri Feb 21 06:59:56 1997
++++ perl5.004_01.my/os2/Changes	Sat Jun 14 02:12:56 1997
+@@ -143,3 +143,9 @@ after 5.003_27:
+ 	environment). Known problems: $$ does not work - is 0, waitpid
+ 	returns immediately, thus Perl cannot wait for completion of
+ 	started programs.
++
++after 5.004_01:
++	flock emulation added (disable by setting env PERL_USE_FLOCK=0),
++		thanks to Rocco Caputo;
++	RSX bug with missing waitpid circomvented;
++	-S bug with full path with \ corrected.
+diff -pru perl5.004_01/os2/diff.configure perl5.004_01.my/os2/diff.configure
+--- perl5.004_01/os2/diff.configure	Fri Feb 28 07:46:06 1997
++++ perl5.004_01.my/os2/diff.configure	Sat Jun 14 10:07:12 1997
+@@ -51,7 +51,16 @@
+  case "$libs" in
+  '') ;;
+  *)  for thislib in $libs; do
+-@@ -4136,6 +4144,10 @@
++@@ -3968,6 +3976,8 @@
++ 			:
++ 		elif try=`./loc $thislib X $libpth`; $test -f "$try"; then
++ 			:
+++		elif try=`./loc $thislib$lib_ext X $libpth`; $test -f "$try"; then
+++			:
++ 		elif try=`./loc Slib$thislib$lib_ext X $xlibpth`; $test -f "$try"; then
++ 			:
++ 		else
++@@ -4152,6 +4162,10 @@
+  	eval $xscan;\
+  	$contains '^fprintf$' libc.list >/dev/null 2>&1; then
+  		eval $xrun
+@@ -175,7 +184,31 @@
+  		dflt=`./try`
+  		case "$dflt" in
+  		[1-4][1-4][1-4][1-4]|12345678|87654321)
+-@@ -8692,7 +8714,7 @@
++@@ -8707,18 +8731,18 @@
++ $cc $ccflags -c bar1.c >/dev/null 2>&1
++ $cc $ccflags -c bar2.c >/dev/null 2>&1
++ $cc $ccflags -c foo.c >/dev/null 2>&1
++-ar rc bar$lib_ext bar2.o bar1.o >/dev/null 2>&1
+++$ar rc bar$lib_ext bar2.o bar1.o >/dev/null 2>&1
++ if $cc $ccflags $ldflags -o foobar foo.o bar$lib_ext $libs > /dev/null 2>&1 &&
++ 	./foobar >/dev/null 2>&1; then
++-	echo "ar appears to generate random libraries itself."
+++	echo "$ar appears to generate random libraries itself."
++ 	orderlib=false
++ 	ranlib=":"
++-elif ar ts bar$lib_ext >/dev/null 2>&1 &&
+++elif $ar ts bar$lib_ext >/dev/null 2>&1 &&
++ 	$cc $ccflags $ldflags -o foobar foo.o bar$lib_ext $libs > /dev/null 2>&1 &&
++ 	./foobar >/dev/null 2>&1; then
++-		echo "a table of contents needs to be added with 'ar ts'."
+++		echo "a table of contents needs to be added with '$ar ts'."
++ 		orderlib=false
++-		ranlib="ar ts"
+++		ranlib="$ar ts"
++ else
++ 	case "$ranlib" in
++ 	:) ranlib='';;
++@@ -8790,7 +8814,7 @@
+  	'') $echo $n ".$c"
+  		if $cc $ccflags \
+  		$i_time $i_systime $i_systimek $sysselect $s_timeval $s_timezone \
+diff -pru perl5.004_01/os2/Makefile.SHs perl5.004_01.my/os2/Makefile.SHs
+--- perl5.004_01/os2/Makefile.SHs	Wed Dec 18 16:30:34 1996
++++ perl5.004_01.my/os2/Makefile.SHs	Sat Jun 14 01:40:54 1997
+@@ -54,6 +54,7 @@ perl5.def: perl.linkexp
+ 	echo '  "dlerror"'				>>$@
+ 	echo '  "my_tmpfile"'				>>$@
+ 	echo '  "my_tmpnam"'				>>$@
++	echo '  "my_flock"'				>>$@
+ !NO!SUBS!
+ 
+ if [ ! -z "$myttyname" ] ; then
+diff -pru perl5.004_01/os2/os2.c perl5.004_01.my/os2/os2.c
+--- perl5.004_01/os2/os2.c	Wed Apr 30 11:30:08 1997
++++ perl5.004_01.my/os2/os2.c	Sat Jun 14 01:48:14 1997
+@@ -1196,3 +1196,116 @@ my_tmpfile ()
+     return fopen(my_tmpnam(NULL), "w+b"); /* Race condition, but
+ 					     grants TMP. */
+ }
++
++#undef flock
++
++/* This code was contributed by Rocco Caputo. */
++int 
++my_flock(int handle, int op)
++{
++  FILELOCK      rNull, rFull;
++  ULONG         timeout, handle_type, flag_word;
++  APIRET        rc;
++  int           blocking, shared;
++  static int	use_my = -1;
++
++  if (use_my == -1) {
++    char *s = getenv("USE_PERL_FLOCK");
++    if (s)
++	use_my = atoi(s);
++    else 
++	use_my = 1;
++  }
++  if (!(_emx_env & 0x200) || !use_my) 
++    return flock(handle, op);	/* Delegate to EMX. */
++  
++                                        // is this a file?
++  if ((DosQueryHType(handle, &handle_type, &flag_word) != 0) ||
++      (handle_type & 0xFF))
++  {
++    errno = EBADF;
++    return -1;
++  }
++                                        // set lock/unlock ranges
++  rNull.lOffset = rNull.lRange = rFull.lOffset = 0;
++  rFull.lRange = 0x7FFFFFFF;
++                                        // set timeout for blocking
++  timeout = ((blocking = !(op & LOCK_NB))) ? 100 : 1;
++                                        // shared or exclusive?
++  shared = (op & LOCK_SH) ? 1 : 0;
++                                        // do not block the unlock
++  if (op & (LOCK_UN | LOCK_SH | LOCK_EX)) {
++    rc = DosSetFileLocks(handle, &rFull, &rNull, timeout, shared);
++    switch (rc) {
++      case 0:
++        errno = 0;
++        return 0;
++      case ERROR_INVALID_HANDLE:
++        errno = EBADF;
++        return -1;
++      case ERROR_SHARING_BUFFER_EXCEEDED:
++        errno = ENOLCK;
++        return -1;
++      case ERROR_LOCK_VIOLATION:
++        break;                          // not an error
++      case ERROR_INVALID_PARAMETER:
++      case ERROR_ATOMIC_LOCK_NOT_SUPPORTED:
++      case ERROR_READ_LOCKS_NOT_SUPPORTED:
++        errno = EINVAL;
++        return -1;
++      case ERROR_INTERRUPT:
++        errno = EINTR;
++        return -1;
++      default:
++        errno = EINVAL;
++        return -1;
++    }
++  }
++                                        // lock may block
++  if (op & (LOCK_SH | LOCK_EX)) {
++                                        // for blocking operations
++    for (;;) {
++      rc =
++        DosSetFileLocks(
++                handle,
++                &rNull,
++                &rFull,
++                timeout,
++                shared
++        );
++      switch (rc) {
++        case 0:
++          errno = 0;
++          return 0;
++        case ERROR_INVALID_HANDLE:
++          errno = EBADF;
++          return -1;
++        case ERROR_SHARING_BUFFER_EXCEEDED:
++          errno = ENOLCK;
++          return -1;
++        case ERROR_LOCK_VIOLATION:
++          if (!blocking) {
++            errno = EWOULDBLOCK;
++            return -1;
++          }
++          break;
++        case ERROR_INVALID_PARAMETER:
++        case ERROR_ATOMIC_LOCK_NOT_SUPPORTED:
++        case ERROR_READ_LOCKS_NOT_SUPPORTED:
++          errno = EINVAL;
++          return -1;
++        case ERROR_INTERRUPT:
++          errno = EINTR;
++          return -1;
++        default:
++          errno = EINVAL;
++          return -1;
++      }
++                                        // give away timeslice
++      DosSleep(1);
++    }
++  }
++
++  errno = 0;
++  return 0;
++}
+diff -pru perl5.004_01/os2/os2ish.h perl5.004_01.my/os2/os2ish.h
+--- perl5.004_01/os2/os2ish.h	Thu Apr 10 08:31:36 1997
++++ perl5.004_01.my/os2/os2ish.h	Sat Jun 14 01:49:40 1997
+@@ -15,6 +15,7 @@
+ #define HAS_KILL
+ #define HAS_WAIT
+ #define HAS_DLERROR
++#define HAS_WAITPID_RUNTIME (_emx_env & 0x200)
+ 
+ /* USEMYBINMODE
+  *	This symbol, if defined, indicates that the program should
+@@ -125,6 +126,7 @@ char *my_tmpnam (char *);
+ #define fwrite1 fwrite
+ 
+ #define my_getenv(var) getenv(var)
++#define flock	my_flock
+ 
+ void *emx_calloc (size_t, size_t);
+ void emx_free (void *);
+diff -pru perl5.004_01/perl.c perl5.004_01.my/perl.c
+--- perl5.004_01/perl.c	Mon Jun  9 16:52:04 1997
++++ perl5.004_01.my/perl.c	Sat Jun 14 01:54:52 1997
+@@ -1654,7 +1654,11 @@ SV *sv;
+ 		continue;	/* don't search dir with too-long name */
+ 	    strcat(tokenbuf, scriptname);
+ #else  /* !VMS */
+-    if (dosearch && !strchr(scriptname, '/') && (s = getenv("PATH"))) {
++    if (dosearch && !strchr(scriptname, '/') 
++#ifdef DOSISH
++	&& !strchr(scriptname, '\\') 
++#endif
++        && (s = getenv("PATH"))) {
+ 	bufend = s + strlen(s);
+ 	while (s < bufend) {
+ #ifndef atarist
+diff -pru perl5.004_01/util.c perl5.004_01.my/util.c
+--- perl5.004_01/util.c	Mon Jun  9 16:52:06 1997
++++ perl5.004_01.my/util.c	Sat Jun 14 02:15:20 1997
+@@ -2085,11 +2085,17 @@ int flags;
+ 	}
+     }
+ #ifdef HAS_WAITPID
++#  ifdef HAS_WAITPID_RUNTIME
++    if (!HAS_WAITPID_RUNTIME)
++	goto hard_way;
++#  endif
+     return waitpid(pid,statusp,flags);
+-#else
+-#ifdef HAS_WAIT4
++#endif
++#if !defined(HAS_WAITPID) && defined(HAS_WAIT4)
+     return wait4((pid==-1)?0:pid,statusp,flags,Null(struct rusage *));
+-#else
++#endif
++#if !defined(HAS_WAITPID) && !defined(HAS_WAIT4) || defined(HAS_WAITPID_RUNTIME)
++  hard_way:
+     {
+ 	I32 result;
+ 	if (flags)
+@@ -2102,7 +2108,6 @@ int flags;
+ 	}
+ 	return result;
+     }
+-#endif
+ #endif
+ }
+ #endif /* !DOSISH */
+--- perl5.004_01/README.os2	Thu May  8 09:31:34 1997
++++ perl5.004_01.my/README.os2	Sat Jun 14 15:09:14 1997
+@@ -1082,8 +1082,13 @@
+ 
+ =item
+ 
+-Since L<flock(3)> is present in EMX, but is not functional, the same is
+-true for perl. Here is the list of things which may be "broken" on
++Since L<flock(3)> is present in EMX, but is not functional, it is 
++emulated by perl.  To disable the emulations, set environment variable
++C<USE_PERL_FLOCK=0>.
++
++=item
++
++Here is the list of things which may be "broken" on
+ EMX (from EMX docs):
+ 
+ =over
+@@ -1099,7 +1104,7 @@
+ 
+ =item *
+ 
+-L<flock(3)> is not yet implemented (dummy function).
++L<flock(3)> is not yet implemented (dummy function).  (Perl has a workaround.)
+ 
+ =item *
+ 
+@@ -1155,6 +1160,12 @@
+ 
+ C<os2_stat> special-cases F</dev/tty> and F</dev/con>.
+ 
++=item C<flock>
++
++Since L<flock(3)> is present in EMX, but is not functional, it is 
++emulated by perl.  To disable the emulations, set environment variable
++C<USE_PERL_FLOCK=0>.
++
+ =back
+ 
+ =head1 Perl flavors
+@@ -1333,6 +1344,12 @@
+ 
+ Specific for EMX port. Gives the directory part of the location for
+ F<sh.exe>.
++
++=head2 C<USE_PERL_FLOCK>
++
++Specific for EMX port. Since L<flock(3)> is present in EMX, but is not 
++functional, it is emulated by perl.  To disable the emulations, set 
++environment variable C<USE_PERL_FLOCK=0>.
+ 
+ =head2 C<TMP> or C<TEMP>
+ 
+--- perl5.004_01/hints/os2.sh~	Thu Mar 20 21:24:04 1997
++++ perl5.004_01/hints/os2.sh	Mon Jun 16 12:04:40 1997
+@@ -189,6 +189,15 @@ nm_opt='-p'
+ d_getprior='define'
+ d_setprior='define'
+ 
++# Make denser object files and DLL
++case "X$optimize" in
++  X)
++	optimize="-O2 -fomit-frame-pointer -malign-loops=2 -malign-jumps=2 -malign-functions=2"
++	lddlflags="$lddlflags -s"	# Strip symbol table
++	aout_ldflags="$aout_ldflags -s"	# Strip symbol table
++	;;
++esac
++
+ ####### All the rest is commented
+ 
+ # The next two are commented. pdksh handles #!
